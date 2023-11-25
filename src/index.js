@@ -1,30 +1,13 @@
 import { JSDOM } from "jsdom";
+import fs from "node:fs/promises";
 
 const MOZILLA_MAIN_URL = new URL("https://developer.mozilla.org/en-US/docs/Web/HTML/Element");
 const html = await (await fetch(MOZILLA_MAIN_URL)).text();
 const tagsMetadata = parseMainPage(new JSDOM(html).window.document);
-const tagsDataResult = await Promise.allSettled(tagsMetadata.map(parseTagPage));
+const tagsData = await Promise.all(tagsMetadata.map(parseTagPage));
+const tagsInterface = tagsData.map(renderTagInterface);
 
-for (const tagData of tagsDataResult) {
-  switch (tagData.status) {
-    case "fulfilled":
-      process.stdout.write(JSON.stringify(tagData.value, null, 2) + "\n", "utf8");
-      break;
-    case "rejected":
-      /** @type {string}  */
-      let error;
-
-      if (tagData.reason instanceof Error) {
-        const { message, name, stack } = tagData.reason;
-        error = JSON.stringify({ name, message, stack }, null, 2);
-      } else {
-        error = tagData.reason.toString();
-      }
-
-      process.stderr.write(error + "\n", "utf8");
-      break;
-  }
-}
+fs.writeFile("./interfaces.d.ts", tagsInterface.join("\n"));
 
 /**
  * @typedef TagMetadata
@@ -99,4 +82,25 @@ async function parseTagPage(metadata) {
   }
 
   return output;
+}
+
+/**
+ * @param {TagData} tagData
+ * @returns {string}
+ */
+function renderTagInterface(tagData) {
+  const capitalized = tagData.tag.charAt(0).toUpperCase() + tagData.tag.slice(1);
+
+  let attributes = "";
+  for (const attribute of tagData.attributes) {
+    const name = attribute.name.includes("-") ? `"${attribute.name}"` : attribute.name;
+    if (attribute.deprecated) attributes += "\n  /** @deprecated */";
+    attributes += `\n  ${name}?: string;`;
+  }
+
+  const description = `\n/**\n* ${tagData.description}\n*/`;
+  const declaration =
+    `\ninterface ${capitalized}TagAttributes {${attributes}` + `${attributes.length ? "\n" : ""}}`;
+
+  return description + declaration;
 }
