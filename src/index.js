@@ -16,7 +16,7 @@ for (const tagData of tagsDataResult) {
 
       if (tagData.reason instanceof Error) {
         const { message, name, stack } = tagData.reason;
-        error = JSON.stringify({ name: name, message: message, stack: stack }, null, 2);
+        error = JSON.stringify({ name, message, stack }, null, 2);
       } else {
         error = tagData.reason.toString();
       }
@@ -28,7 +28,7 @@ for (const tagData of tagsDataResult) {
 
 /**
  * @typedef TagMetadata
- * @property {string} name
+ * @property {string} tag
  * @property {URL?} url
  * @property {string} description
  */
@@ -48,7 +48,7 @@ function parseMainPage(document) {
       const href = td.getAttribute("href");
       const url = href ? new URL(href, MOZILLA_MAIN_URL.origin) : null;
       const description = tr.children[1].textContent;
-      output.push({ name: td.textContent.slice(1, -1), url, description });
+      output.push({ tag: td.textContent.slice(1, -1), url, description });
     }
   }
 
@@ -57,9 +57,15 @@ function parseMainPage(document) {
 
 /**
  * @typedef TagData
- * @property {string} name
+ * @property {string} tag
  * @property {string} description
- * @property {string[]} attributes
+ * @property {AttributeData[]} attributes
+ *
+ * @typedef AttributeData
+ * @property {string} name
+ * @property {boolean} deprecated
+ * @property {boolean} nonStandard
+ * @property {boolean} experimental
  */
 
 /**
@@ -68,17 +74,28 @@ function parseMainPage(document) {
  */
 async function parseTagPage(metadata) {
   /** @type {TagData}  */
-  const output = { name: metadata.name, description: metadata.description, attributes: [] };
-  if (!metadata.url) Promise.resolve(output);
+  const output = { tag: metadata.tag, description: metadata.description, attributes: [] };
+  if (!metadata.url) return Promise.resolve(output);
 
   const html = await (await fetch(metadata.url)).text();
   const document = new JSDOM(html).window.document;
-  const dls = document.querySelectorAll("div > dl");
+  const dts = document.querySelectorAll(
+    "section[aria-labelledby*=attributes]:not([aria-labelledby=global_attributes]) > div > dl > dt"
+  );
 
-  for (const dl of dls) {
-    for (const attribute of dl.getElementsByTagName("dt")) {
-      output.attributes.push(attribute.textContent);
+  for (const dt of dts) {
+    const name = dt.querySelector("code").textContent;
+    /** @type {AttributeData} */
+    const attribute = { name, deprecated: false, experimental: false, nonStandard: false };
+
+    for (const span of dt.querySelectorAll("abbr > span")) {
+      const text = span.textContent.toLowerCase();
+      attribute.deprecated = attribute.deprecated || text === "deprecated";
+      attribute.experimental = attribute.experimental || text === "experimental";
+      attribute.nonStandard = attribute.nonStandard || text === "nonStandard";
     }
+
+    output.attributes.push(attribute);
   }
 
   return output;
